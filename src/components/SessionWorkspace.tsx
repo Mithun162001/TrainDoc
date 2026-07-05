@@ -68,7 +68,7 @@ export default function SessionWorkspace({
   // 2 = Action Selection / Options Configure
   // 3 = Generation Preview & Accept/Reject
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
-  const [activeModule, setActiveModule] = useState<'transcript' | 'summary' | 'faq' | 'architecture' | 'wordDoc' | null>(null);
+  const [activeModule, setActiveModule] = useState<'transcript' | 'summary' | 'faq' | 'architectureReport' | 'wordDoc' | null>(null);
 
   // Connection warning if not sandbox and not validated
   const [isLlmAvailable, setIsLlmAvailable] = useState<boolean>(true);
@@ -433,7 +433,7 @@ export default function SessionWorkspace({
           resultText = generateMockSummary(uploadedFile.name, summaryOptions);
         } else if (moduleType === 'faq') {
           resultText = generateMockFAQ(uploadedFile.name, faqOptions);
-        } else if (moduleType === 'architecture') {
+        } else if (moduleType === 'architectureReport') {
           const report = generateMockArchitectureReport(uploadedFile.name, archOptions);
           resultText = report.content;
           svg = report.diagramSvg;
@@ -451,7 +451,7 @@ export default function SessionWorkspace({
         } else if (moduleType === 'faq') {
           prompt = `Classify and list FAQs from "${uploadedFile.name}". Settings:\nDedupe: ${faqOptions.dedupe}\nGroup by topics: ${faqOptions.groupByTopic}\nTopics to group: ${faqOptions.topics.join(', ')}\nFlag unanswered/gaps: ${faqOptions.flagUnanswered}`;
           systemInstruction = `Format the output strictly as a professional Q&A markdown document.`;
-        } else if (moduleType === 'architecture') {
+        } else if (moduleType === 'architectureReport') {
           prompt = `Write a system architecture analysis report for "${uploadedFile.name}". Settings:\nDiagrams requested: ${archOptions.includeDiagrams}\nDepth Level: ${archOptions.depth}\nGlossary requested: ${archOptions.includeGlossary}`;
           systemInstruction = `Compile a structured enterprise specification. Use clean headings, descriptions, and ASCII or text flow diagrams.`;
         } else if (moduleType === 'wordDoc') {
@@ -486,7 +486,7 @@ Please compile this into a beautifully detailed, structured, chapter-by-chapter 
         if (response.ok && resData.success) {
           resultText = resData.text;
           // For architecture, draw a beautiful SVG based on results or fallback to standard report diagram
-          if (moduleType === 'architecture' && archOptions.includeDiagrams) {
+          if (moduleType === 'architectureReport' && archOptions.includeDiagrams) {
             svg = generateMockArchitectureReport(uploadedFile.name, archOptions).diagramSvg;
           }
         } else {
@@ -541,7 +541,7 @@ Please compile this into a beautifully detailed, structured, chapter-by-chapter 
       configSnapshot: activeModule === 'transcript' ? { ...videoOptions } 
                      : activeModule === 'summary' ? { ...summaryOptions }
                      : activeModule === 'faq' ? { ...faqOptions }
-                     : activeModule === 'architecture' ? { ...archOptions }
+                     : activeModule === 'architectureReport' ? { ...archOptions }
                      : { ...wordOptions }
     };
 
@@ -1769,7 +1769,7 @@ Please compile this into a beautifully detailed, structured, chapter-by-chapter 
 
                 <button
                   id="trigger-architecture-btn"
-                  onClick={() => runGeneration('architecture')}
+                  onClick={() => runGeneration('architectureReport')}
                   disabled={!isLlmAvailable || isGenerating}
                   className="w-full mt-2 bg-[#008567] hover:bg-[#01a982] text-white text-xs font-bold py-2 rounded-xl transition-all disabled:opacity-40 active:scale-[0.98]"
                 >
