@@ -1,0 +1,6 @@
+{
+  "name": "TrainDoc",
+  "description": "A user-controlled training documentation assistant for videos and document ingestion with custom LLM configurations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
