@@ -60,7 +60,7 @@ export default function Dashboard({ sessions, onSelectSession, onStartNewSession
   return (
     <div className="space-y-8">
       {/* Welcome & Quick Ingestion Panel */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm relative overflow-hidden">
+      <div className="bg-gradient-to-br from-[#008567]/5 via-white to-slate-50 border border-slate-200 rounded-3xl p-8 shadow-sm relative overflow-hidden">
         {/* Glow decorative spheres */}
         <div className="absolute -top-24 -left-24 w-60 h-60 rounded-full bg-[#2ad2c9]/5 blur-3xl" />
         <div className="absolute -bottom-24 -right-24 w-60 h-60 rounded-full bg-[#ff8d6d]/5 blur-3xl" />

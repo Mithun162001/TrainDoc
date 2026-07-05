@@ -299,45 +299,67 @@ export function generateMockArchitectureReport(filename: string, options: ArchOp
 
 export function generateMockWordDocument(filename: string, options: DocGenOptions): string {
   const topic = determineTopic(filename);
-  let doc = `# 📄 Generated Word Specification: ${topic}\n`;
-  doc += `**Tone Style**: ${options.tone} | **Audience Variant**: ${options.audienceVariant} | **Detail Profile**: ${options.detailLevel}\n\n`;
+  
+  let doc = `# 📘 Detailed Chapter-Wise Learning Document: ${topic}\n`;
+  doc += `**Reference Sources**: Training Transcript & Uploaded PPT Presentations\n`;
+  doc += `**Tone Profile**: ${options.tone} | **Audience**: ${options.audienceVariant} | **Format Structure**: ${options.structure}\n\n`;
 
-  if (options.structure === 'Headings only') {
-    doc += `## Core System Operations\n`;
-    doc += `This session is optimized for a **${options.audienceVariant}** audience. We emphasize high-level strategic architecture and core deployment matrices.\n\n`;
-    doc += `## Key Escalation Guidelines\n`;
-    doc += `Maintain clean communication handovers and log escalations inside Central Operations directory.\n`;
-  } else if (options.structure === 'Headings + subheadings') {
-    doc += `## Section 1: Strategic Foundations\n`;
-    doc += `### 1.1 Structural Parameters\n`;
-    doc += `Providing optimal system stability requires setting explicit constraints. This matches the **${options.tone}** tone profile requested.\n\n`;
-    doc += `### 1.2 System Integration Map\n`;
-    doc += `All services route queries via an active gateway layer before contacting server cores.\n\n`;
-    doc += `## Section 2: Operational Escalation Rules\n`;
-    doc += `### 2.1 Handover Sequence\n`;
-    doc += `If SLAs are breached, direct lead pinging must trigger in under 15 minutes.`;
-  } else {
-    // Flat narrative
-    doc += `### Operational Narrative Summary\n`;
-    doc += `This flat report delivers a direct operational narrative for ${topic} configured in a **${options.tone}** tone. `;
-    doc += `We outline how containers and workflows should maintain reliable operation. Teams should register custom configurations early in the launch cycle. `;
-    doc += `Any anomalies or handovers are logged centrally. Staging values must perfectly mirror production to keep delivery clean.`;
-  }
+  doc += `## Preface & Document Purpose\n`;
+  doc += `This detailed reference guide compiles knowledge from the training transcript and matching slide decks (PPT). It serves as a comprehensive, chapter-wise learning resource for future readings, ensuring that all architectural details, operational thresholds, and diagrams are preserved with high-fidelity explanations.\n\n`;
+
+  doc += `## Chapter 1: Core Objectives & Foundational Principles\n`;
+  doc += `### 1.1 Topic Overview & Key Themes\n`;
+  doc += `The primary theme centers on establishing highly available, secure, and predictable systems for **${topic}**. By analyzing both the live discussion (transcript) and structured visual slide decks, we bridge the gap between high-level architectural theories and concrete on-the-ground operational setups.\n\n`;
+  
+  doc += `### 1.2 Learning Objectives\n`;
+  doc += `* Understand system-level container orchestration or support escalation matrices.\n`;
+  doc += `* Define clear resource limit policies to prevent unplanned service interruptions.\n`;
+  doc += `* Establish automated threshold alarms and SLA verification protocols.\n\n`;
+
+  doc += `## Chapter 2: Detailed Architectural Breakdown & Technical Specifications\n`;
+  doc += `### 2.1 Slide Reference: Core Component Schematics\n`;
+  doc += `Referencing slide 1 of the uploaded PPT deck, we map the core component hierarchy. Client requests hit the primary gateway and route downward according to active rules. As discussed in the transcript, maintaining consistent environment parity between staging and production prevents sudden deployment regressions.\n\n`;
+
+  doc += `### 2.2 Threshold & Critical Limit Settings\n`;
+  doc += `* **Optimal CPU Limits**: Configured thresholds suggest 80% maximum capacity alarms.\n`;
+  doc += `* **Memory Ceilings**: Unlike compressible CPU cycles, memory violations lead to instantaneous OOMKill states, which must be guarded against through explicit requests.\n\n`;
+
+  doc += `## Chapter 3: Operational Runbooks & Escalation Matrix\n`;
+  doc += `### 3.1 SLA Protection Pipelines\n`;
+  doc += `When an incident occurs, the countdown begins. As outlined in the transcript, handovers between tiers must execute within strict timelines. Under imminent SLA breaches (defined as 15 minutes or less to threshold), engineers are directed to skip asynchronous ticketing queues and directly trigger the primary escalation pathway.\n\n`;
+
+  doc += `### 3.2 Diagram References & Systems Interaction\n`;
+  doc += `*(See visual interactive flowchart in the dashboard preview tab for the detailed sequence)*\n\n`;
+
+  doc += `## Chapter 4: Case Studies, Best Practices & Key Gaps\n`;
+  doc += `### 4.1 Production Failure Modes\n`;
+  doc += `By checking historical incidents against the current training PPT, we outline typical failure modes:\n`;
+  doc += `1. **Resource Mismatch**: Staging variables deviating from production environments, leading to runtime failures.\n`;
+  doc += `2. **Delayed Response**: Relying strictly on email-based queues during high-severity system outages instead of using direct ping escalations.\n\n`;
+
+  doc += `### 4.2 Future-Proofing & Next Steps\n`;
+  doc += `For future readings, keep these guidelines close: review limits quarterly, maintain a unified team glossary, and continuously validate failover behaviors under simulated stresses.\n`;
 
   if (options.includeCharts && options.chartTypes.length > 0) {
-    doc += `\n\n### 📊 Configured Reference Matrix & Charts:\n`;
+    doc += `\n\n## Chapter 5: Configured Reference Matrix & Charts\n`;
     options.chartTypes.forEach(chart => {
-      doc += `* **[Chart Enabled: ${chart.toUpperCase()}]**\n`;
+      doc += `### 📊 Chart Reference: ${chart.toUpperCase()}\n`;
       if (chart.includes('flow')) {
-        doc += `  - *Visual Flow*: Ingestion -> Token Parser -> Document Structure Validation -> Render Output.\n`;
+        doc += `* **Operational Pipeline Flowchart**:\n`;
+        doc += `  Source Input -> Abstracted Parsing -> Layout Validation -> Structured Document Rendering.\n\n`;
       } else if (chart.includes('table')) {
-        doc += `  - *Comparison Table*:\n`;
-        doc += `    | Resource | Compressible | Outage Risk | Escalation Channel |\n`;
-        doc += `    | --- | --- | --- | --- |\n`;
-        doc += `    | CPU | Yes | Medium (Throttling) | DevOps Staging |\n`;
-        doc += `    | Memory | No | Critical (OOMKill) | SRE Direct |\n`;
+        doc += `* **SLA & Limit Matrix Comparison Table**:\n`;
+        doc += `\n`;
+        doc += `| Parameter | Risk Level | Compressibility | Escalation Target |\n`;
+        doc += `| :--- | :--- | :--- | :--- |\n`;
+        doc += `| **CPU Capacity** | Medium | Yes (Throttled) | Operations Team |\n`;
+        doc += `| **Memory Alloc** | Critical | No (OOMKilled) | SRE Direct |\n`;
+        doc += `| **SLA Delay** | High | No (Breached) | Tech Lead Slack |\n\n`;
       } else {
-        doc += `  - *Timeline Matrix*: Month 1: Audit -> Month 2: Test Staging -> Month 3: Go Live.\n`;
+        doc += `* **Implementation & Validation Timeline**:\n`;
+        doc += `  - *Phase A (Week 1)*: Configuration Audit & Environment Alignment.\n`;
+        doc += `  - *Phase B (Week 2)*: Staging Environment Stress Tests & Limit Validations.\n`;
+        doc += `  - *Phase C (Week 3)*: Full Production Rollout & Active SLA Alert Tuning.\n\n`;
       }
     });
   }

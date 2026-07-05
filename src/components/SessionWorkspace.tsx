@@ -455,8 +455,18 @@ export default function SessionWorkspace({
           prompt = `Write a system architecture analysis report for "${uploadedFile.name}". Settings:\nDiagrams requested: ${archOptions.includeDiagrams}\nDepth Level: ${archOptions.depth}\nGlossary requested: ${archOptions.includeGlossary}`;
           systemInstruction = `Compile a structured enterprise specification. Use clean headings, descriptions, and ASCII or text flow diagrams.`;
         } else if (moduleType === 'wordDoc') {
-          prompt = `Compile a comprehensive Word specification template for "${uploadedFile.name}". Options:\nTone: ${wordOptions.tone}\nStructure: ${wordOptions.structure}\nDetail Level: ${wordOptions.detailLevel}\nInclude Charts: ${wordOptions.includeCharts}\nCharts selected: ${wordOptions.chartTypes.join(', ')}\nAudience Variant: ${wordOptions.audienceVariant}`;
-          systemInstruction = `Act as an elite Enterprise Tech Writer. Output deep technical training manuals ready for Word compilation.`;
+          prompt = `Make the full chapter-wise learning document from the transcript and use any uploaded files/PPT as well for diagrams, references, and more details. Take your time, analyze the things properly, ensure no mistakes, and then make the chapter-wise learning document from both the transcript and uploaded documents (using them as reference). Keep the document content in detail as much as possible, since it is needed as reference notes for future readings.
+Target Topic / Filename: "${uploadedFile.name}"
+Options:
+- Tone Profile: ${wordOptions.tone}
+- Outline Structure: ${wordOptions.structure}
+- Depth Profile: ${wordOptions.detailLevel}
+- Include Charts: ${wordOptions.includeCharts}
+- Selected Charts: ${wordOptions.chartTypes.join(', ')}
+- Target Audience: ${wordOptions.audienceVariant}
+
+Please compile this into a beautifully detailed, structured, chapter-by-chapter reference guide with exhaustive content, code snippets if relevant, and professional inline charts/matrices as configured.`;
+          systemInstruction = `Act as an elite Enterprise Tech Writer and Curriculum Designer. Generate a highly detailed, chapter-wise learning document ready for Word compilation, matching the exact user prompt guidelines. Ensure the information is rich, exhaustive, and structured with clear Markdown headings (#, ##, ###).`;
         }
 
         // Call server-side API proxy
@@ -619,30 +629,115 @@ export default function SessionWorkspace({
     });
   };
 
-  // Client-side file downloader (.txt, .md, real word download using docx)
-  const downloadFile = async (title: string, format: 'txt' | 'md' | 'docx') => {
+  // Client-side file downloader (.txt, .md, real word download using docx, raw diagram svg)
+  const downloadFile = async (title: string, format: 'txt' | 'md' | 'docx' | 'svg') => {
     const content = generatedPreviewContent || "No preview active.";
     let blob: Blob;
     let filename = `${title}.${format}`;
 
     if (format === 'docx') {
       try {
-        const { Document, Packer, Paragraph, TextRun } = await import('docx');
+        const { Document, Packer, Paragraph, TextRun, ImageRun } = await import('docx');
+
+        // Helper to convert SVG string to a PNG base64 in the browser
+        const svgToPng = (svgString: string): Promise<string> => {
+          return new Promise((resolve, reject) => {
+            try {
+              let formattedSvg = svgString;
+              if (!formattedSvg.includes('xmlns="http://www.w3.org/2000/svg"')) {
+                formattedSvg = formattedSvg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+              }
+
+              const img = new Image();
+              const svgBlob = new Blob([formattedSvg], { type: 'image/svg+xml;charset=utf-8' });
+              const url = URL.createObjectURL(svgBlob);
+
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                // Use high quality dimensions for rendering
+                const width = 1200;
+                const height = 750;
+                canvas.width = width;
+                canvas.height = height;
+
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                  ctx.fillStyle = '#ffffff';
+                  ctx.fillRect(0, 0, width, height);
+                  ctx.drawImage(img, 0, 0, width, height);
+                  const dataUrl = canvas.toDataURL('image/png');
+                  URL.revokeObjectURL(url);
+                  resolve(dataUrl);
+                } else {
+                  URL.revokeObjectURL(url);
+                  reject(new Error("Could not get canvas context"));
+                }
+              };
+
+              img.onerror = (err) => {
+                URL.revokeObjectURL(url);
+                reject(err);
+              };
+
+              img.src = url;
+            } catch (e) {
+              reject(e);
+            }
+          });
+        };
+
+        // Render diagram SVG to a docx ImageRun element if available
+        let imageRunElement: any = null;
+        if (generatedDiagramSvg) {
+          try {
+            const pngBase64 = await svgToPng(generatedDiagramSvg);
+            const base64Data = pngBase64.split(',')[1];
+            const binaryString = window.atob(base64Data);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+
+            imageRunElement = new Paragraph({
+              children: [
+                new ImageRun({
+                  data: bytes.buffer,
+                  transformation: {
+                    width: 580, // perfect page-width fit
+                    height: 360,
+                  },
+                } as any),
+              ],
+              spacing: { before: 240, after: 240 },
+            });
+          } catch (err) {
+            console.error("Failed to render SVG diagram to PNG for docx:", err);
+          }
+        }
 
         const lines = content.split('\n');
         const children: any[] = [];
+
+        // Format a human-readable header title
+        const cleanTitle = (rawTitle: string): string => {
+          const withoutCompiled = rawTitle.replace('-compiled', '').replace(/[-_]/g, ' ');
+          return withoutCompiled.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') + ' Report';
+        };
+        const docTitle = cleanTitle(title);
 
         // Main Title Header styled professionally
         children.push(
           new Paragraph({
             children: [
               new TextRun({
-                text: title,
+                text: docTitle,
                 bold: true,
-                size: 32, // 16pt (1 size = 1/2 pt)
+                size: 32, // 16pt
+                color: "0f172a", // slate-900
               })
             ],
-            spacing: { after: 200 },
+            spacing: { before: 120, after: 120 },
           })
         );
 
@@ -654,45 +749,134 @@ export default function SessionWorkspace({
                 text: "This document was compiled on TrainDoc Workspace via configuration inputs.",
                 italics: true,
                 size: 18, // 9pt
-                color: "666666",
+                color: "64748b", // slate-500
               }),
             ],
-            spacing: { after: 300 },
+            spacing: { after: 360 },
           })
         );
+
+        // Inline parser for bold (**text**) and italic (*text*) inside docx Paragraphs
+        const parseLineToTextRuns = (lineText: string, options?: { isHeading?: boolean; isItalicLine?: boolean }) => {
+          const runs: any[] = [];
+          const formatRegex = /(\*\*([^*]+)\*\*)|(\*([^*]+)\*)/g;
+          let currentIndex = 0;
+          let match;
+
+          const baseSize = options?.isHeading ? 24 : 21; // 12pt heading, 10.5pt body text
+          const isItalicLine = options?.isItalicLine || false;
+          const defaultColor = options?.isHeading ? "0f172a" : "334155"; // slate-900 vs slate-700
+
+          while ((match = formatRegex.exec(lineText)) !== null) {
+            const matchIndex = match.index;
+
+            if (matchIndex > currentIndex) {
+              runs.push(
+                new TextRun({
+                  text: lineText.substring(currentIndex, matchIndex),
+                  size: baseSize,
+                  italics: isItalicLine,
+                  color: defaultColor,
+                })
+              );
+            }
+
+            if (match[1]) {
+              // Bold
+              runs.push(
+                new TextRun({
+                  text: match[2],
+                  bold: true,
+                  size: baseSize,
+                  italics: isItalicLine,
+                  color: "0f172a",
+                })
+              );
+            } else if (match[3]) {
+              // Italic
+              runs.push(
+                new TextRun({
+                  text: match[4],
+                  italics: true,
+                  size: baseSize,
+                  color: defaultColor,
+                })
+              );
+            }
+
+            currentIndex = formatRegex.lastIndex;
+          }
+
+          if (currentIndex < lineText.length) {
+            runs.push(
+              new TextRun({
+                text: lineText.substring(currentIndex),
+                size: baseSize,
+                italics: isItalicLine,
+                color: defaultColor,
+              })
+            );
+          }
+
+          if (runs.length === 0) {
+            runs.push(
+              new TextRun({
+                text: lineText,
+                size: baseSize,
+                italics: isItalicLine,
+                color: defaultColor,
+              })
+            );
+          }
+
+          return runs;
+        };
+
+        let insertedDiagram = false;
 
         // Parse markdown-like content into docx elements
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) {
-            // Empty spacer paragraph
             children.push(new Paragraph({ spacing: { after: 120 } }));
+            continue;
+          }
+
+          // Check if it is a visual diagram placeholder
+          const isPlaceholder = trimmed.includes('See visual interactive flowchart') || trimmed.includes('dashboard preview tab') || trimmed.includes('*(See visual interactive flowchart');
+          if (isPlaceholder) {
+            if (imageRunElement) {
+              children.push(imageRunElement);
+              insertedDiagram = true;
+            } else {
+              children.push(
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: "[Interactive visual diagram preview loaded below]",
+                      italics: true,
+                      size: 20,
+                      color: "64748b",
+                    })
+                  ],
+                  spacing: { before: 120, after: 120 },
+                })
+              );
+            }
             continue;
           }
 
           if (trimmed.startsWith('# ')) {
             children.push(
               new Paragraph({
-                children: [
-                  new TextRun({
-                    text: trimmed.replace('# ', ''),
-                    bold: true,
-                    size: 28, // 14pt
-                  })
-                ],
+                children: parseLineToTextRuns(trimmed.replace('# ', ''), { isHeading: true }),
                 spacing: { before: 240, after: 120 },
               })
             );
           } else if (trimmed.startsWith('## ')) {
             children.push(
               new Paragraph({
-                children: [
-                  new TextRun({
-                    text: trimmed.replace('## ', ''),
-                    bold: true,
-                    size: 24, // 12pt
-                  })
-                ],
+                children: parseLineToTextRuns(trimmed.replace('## ', ''), { isHeading: true }),
                 spacing: { before: 200, after: 100 },
               })
             );
@@ -703,7 +887,7 @@ export default function SessionWorkspace({
                   new TextRun({
                     text: trimmed.replace('### ', ''),
                     bold: true,
-                    size: 20, // 10pt
+                    size: 22, // 11pt
                     color: "008567",
                   })
                 ],
@@ -717,21 +901,18 @@ export default function SessionWorkspace({
                   new TextRun({
                     text: trimmed.replace('#### ', ''),
                     bold: true,
-                    size: 18, // 9pt
-                    color: "B45309",
+                    size: 19, // 9.5pt
+                    color: "b45309",
                   })
                 ],
                 spacing: { before: 120, after: 60 },
               })
             );
           } else if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
+            const cleanedListText = trimmed.replace(/^[*\-]\s+/, '');
             children.push(
               new Paragraph({
-                children: [
-                  new TextRun({
-                    text: trimmed.replace(/^[*\-]\s+/, ''),
-                  })
-                ],
+                children: parseLineToTextRuns(cleanedListText),
                 bullet: { level: 0 },
                 spacing: { after: 100 },
               })
@@ -739,26 +920,36 @@ export default function SessionWorkspace({
           } else if (trimmed.match(/^\d+\.\s+/)) {
             children.push(
               new Paragraph({
-                children: [
-                  new TextRun({
-                    text: trimmed,
-                  })
-                ],
+                children: parseLineToTextRuns(trimmed),
                 spacing: { after: 100 },
               })
             );
           } else {
             children.push(
               new Paragraph({
-                children: [
-                  new TextRun({
-                    text: line,
-                  }),
-                ],
+                children: parseLineToTextRuns(line),
                 spacing: { after: 120 },
               })
             );
           }
+        }
+
+        // If the diagram was not placed at any specific placeholder line, append it to the end beautifully
+        if (imageRunElement && !insertedDiagram) {
+          children.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: "Interactive Flowchart & Layout Visualizer",
+                  bold: true,
+                  size: 24,
+                  color: "0f172a",
+                })
+              ],
+              spacing: { before: 360, after: 120 },
+            })
+          );
+          children.push(imageRunElement);
         }
 
         const doc = new Document({
@@ -775,8 +966,20 @@ export default function SessionWorkspace({
         console.error("Failed to generate DOCX file using 'docx' library. Falling back to structured text.", err);
         blob = new Blob([content], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document;charset=utf-8' });
       }
+    } else if (format === 'md') {
+      let mdContent = content;
+      if (generatedDiagramSvg) {
+        mdContent += `\n\n## 📊 System Architecture Diagram\n\n\`\`\`xml\n${generatedDiagramSvg}\n\`\`\`\n`;
+      }
+      blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8' });
+    } else if (format === 'svg') {
+      blob = new Blob([generatedDiagramSvg || ''], { type: 'image/svg+xml;charset=utf-8' });
     } else {
-      blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      let txtContent = content;
+      if (generatedDiagramSvg) {
+        txtContent += `\n\n========================================\nSYSTEM ARCHITECTURE DIAGRAM (SVG SOURCE):\n========================================\n\n${generatedDiagramSvg}\n`;
+      }
+      blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8' });
     }
 
     const url = URL.createObjectURL(blob);
@@ -1711,6 +1914,16 @@ export default function SessionWorkspace({
                 <FileEdit className="w-3.5 h-3.5" />
                 Word
               </button>
+              {generatedDiagramSvg && (
+                <button
+                  id="preview-download-svg-btn"
+                  onClick={() => downloadFile(`${activeModule}-architecture`, 'svg')}
+                  className="bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1"
+                >
+                  <FileDown className="w-3.5 h-3.5" />
+                  SVG Diagram
+                </button>
+              )}
             </div>
           </div>
 
