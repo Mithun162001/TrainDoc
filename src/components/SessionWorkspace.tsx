@@ -469,6 +469,14 @@ Please compile this into a beautifully detailed, structured, chapter-by-chapter 
           systemInstruction = `Act as an elite Enterprise Tech Writer and Curriculum Designer. Generate a highly detailed, chapter-wise learning document ready for Word compilation, matching the exact user prompt guidelines. Ensure the information is rich, exhaustive, and structured with clear Markdown headings (#, ##, ###).`;
         }
 
+        const currentTranscript = session?.docs?.transcript?.[0]?.content || '';
+        const contextText = uploadedFile.rawText || currentTranscript || '';
+        const options = moduleType === 'transcript' ? videoOptions
+                      : moduleType === 'summary' ? summaryOptions
+                      : moduleType === 'faq' ? faqOptions
+                      : moduleType === 'architectureReport' ? archOptions
+                      : wordOptions;
+
         // Call server-side API proxy
         const response = await fetch('/api/generate', {
           method: 'POST',
@@ -477,6 +485,11 @@ Please compile this into a beautifully detailed, structured, chapter-by-chapter 
             provider: llmConfig.provider,
             endpoint: llmConfig.endpoint,
             model: llmConfig.model,
+            moduleType,
+            uploadedFileName: uploadedFile.name,
+            uploadedFileType: uploadedFile.type,
+            contextText,
+            options,
             prompt,
             systemInstruction
           })
@@ -487,7 +500,7 @@ Please compile this into a beautifully detailed, structured, chapter-by-chapter 
           resultText = resData.text;
           // For architecture, draw a beautiful SVG based on results or fallback to standard report diagram
           if (moduleType === 'architectureReport' && archOptions.includeDiagrams) {
-            svg = generateMockArchitectureReport(uploadedFile.name, archOptions).diagramSvg;
+            svg = resData.svg || generateMockArchitectureReport(uploadedFile.name, archOptions).diagramSvg;
           }
         } else {
           throw new Error(resData.error || 'Generation failed.');
