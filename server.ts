@@ -3,27 +3,213 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
+import { YoutubeTranscript } from "youtube-transcript";
 
 dotenv.config();
 
-// Lazy initialize Gemini client
-let aiClient: GoogleGenAI | null = null;
-function getGeminiClient(): GoogleGenAI {
-  if (!aiClient) {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key || key === "MY_GEMINI_API_KEY") {
-      throw new Error("GEMINI_API_KEY environment variable is not configured on the server.");
+// Helper to extract video ID from YouTube URL
+function extractYoutubeId(url: string): string | null {
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+  const match = url.match(regExp);
+  return (match && match[2].length === 11) ? match[2] : null;
+}
+
+// Helper to format total seconds to [MM:SS]
+function formatTime(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+// Fetch YouTube transcript and structure as timestamped text
+async function fetchYoutubeTranscriptText(url: string): Promise<string> {
+  const videoId = extractYoutubeId(url);
+  if (!videoId) {
+    throw new Error("Invalid YouTube URL. Could not extract Video ID.");
+  }
+  
+  let transcriptItems: { text: string; offset: number }[] = [];
+  let fetchError: any = null;
+
+  try {
+    console.log(`[YouTube Scraper] Trying library-based YoutubeTranscript.fetchTranscript for: ${videoId}`);
+    const items = await YoutubeTranscript.fetchTranscript(videoId);
+    if (items && items.length > 0) {
+      transcriptItems = items.map(item => ({
+        text: item.text,
+        offset: item.offset
+      }));
     }
-    aiClient = new GoogleGenAI({
-      apiKey: key,
-      httpOptions: {
+  } catch (err: any) {
+    console.warn(`[YouTube Scraper] Library-based fetch failed for ${videoId}:`, err.message || err);
+    fetchError = err;
+  }
+
+  // Fallback to our custom robust HTML parsing if library failed or returned empty
+  if (transcriptItems.length === 0) {
+    try {
+      console.log(`[YouTube Scraper] Running fallback custom HTML scraper for: ${videoId}`);
+      const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+      const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
         headers: {
-          'User-Agent': 'aistudio-build',
+          'User-Agent': userAgent,
+          'Accept-Language': 'en-US,en;q=0.9'
+        }
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP Error ${response.status} when fetching YouTube page`);
+      }
+      const html = await response.text();
+      
+      let playerResponse: any = null;
+      // Search for ytInitialPlayerResponse using balanced brace scanner
+      const index = html.indexOf('ytInitialPlayerResponse');
+      if (index !== -1) {
+        const jsonStart = html.indexOf('{', index);
+        if (jsonStart !== -1) {
+          let depth = 0;
+          for (let i = jsonStart; i < html.length; i++) {
+            if (html[i] === '{') depth++;
+            else if (html[i] === '}') {
+              depth--;
+              if (depth === 0) {
+                try {
+                  playerResponse = JSON.parse(html.slice(jsonStart, i + 1));
+                  break;
+                } catch (e) {
+                  // Continue pattern scanning
+                }
+              }
+            }
+          }
         }
       }
-    });
+
+      if (!playerResponse) {
+        // Try simple regex search as secondary option
+        const match = html.match(/ytInitialPlayerResponse\s*=\s*({.*?});/s);
+        if (match) {
+          try { playerResponse = JSON.parse(match[1]); } catch(e) {}
+        }
+      }
+
+      const captionTracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+      if (!Array.isArray(captionTracks) || captionTracks.length === 0) {
+        throw new Error("No captions tracklist found in the YouTube page metadata. Subtitles may be disabled for this video.");
+      }
+
+      // Pick English or first track available
+      const track = captionTracks.find((t: any) => t.languageCode === 'en' || t.languageCode?.startsWith('en')) || captionTracks[0];
+      if (!track || !track.baseUrl) {
+        throw new Error("No caption tracks could be matched.");
+      }
+
+      const transcriptURL = track.baseUrl;
+      const transcriptResponse = await fetch(transcriptURL, {
+        headers: { 'User-Agent': userAgent }
+      });
+      if (!transcriptResponse.ok) {
+        throw new Error(`Failed to fetch XML captions from YouTube servers: status ${transcriptResponse.status}`);
+      }
+      const xml = await transcriptResponse.text();
+
+      // Custom XML parse supporting srv3 (<p t="...">) and classic (<text start="...">)
+      const results: { text: string; offset: number }[] = [];
+      const pRegex = /<p\s+t="(\d+)"\s+d="(\d+)"[^>]*>([\s\S]*?)<\/p>/g;
+      let match;
+      while ((match = pRegex.exec(xml)) !== null) {
+        const startMs = parseInt(match[1], 10);
+        const inner = match[3];
+        let text = '';
+        const sRegex = /<s[^>]*>([^<]*)<\/s>/g;
+        let sMatch;
+        while ((sMatch = sRegex.exec(inner)) !== null) {
+          text += sMatch[1];
+        }
+        if (!text) {
+          text = inner.replace(/<[^>]+>/g, '');
+        }
+        text = text
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&apos;/g, "'")
+          .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+          .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+          .trim();
+        if (text) {
+          results.push({ text, offset: startMs });
+        }
+      }
+
+      if (results.length === 0) {
+        // Classic format: <text start="s" dur="s">content</text>
+        const textRegex = /<text\s+start="([^"]*)"\s+dur="([^"]*)"[^>]*>([\s\S]*?)<\/text>/g;
+        let classicMatch;
+        while ((classicMatch = textRegex.exec(xml)) !== null) {
+          const text = classicMatch[3]
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/&apos;/g, "'")
+            .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+            .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+            .trim();
+          const offset = parseFloat(classicMatch[1]) * 1000; // to ms
+          if (text) {
+            results.push({ text, offset });
+          }
+        }
+      }
+
+      if (results.length > 0) {
+        transcriptItems = results;
+        console.log(`[YouTube Scraper] Fallback custom scraper succeeded with ${results.length} lines.`);
+      } else {
+        throw new Error("Transcripts could not be parsed from XML payload.");
+      }
+    } catch (fallbackErr: any) {
+      console.error(`[YouTube Scraper] Fallback custom scraper also failed:`, fallbackErr.message || fallbackErr);
+      // Throw the most descriptive error
+      const finalErrorMsg = fetchError ? (fetchError.message || fetchError) : (fallbackErr.message || fallbackErr);
+      throw new Error(`Failed to retrieve YouTube captions (${finalErrorMsg}). Please check if captions/subtitles are enabled on this YouTube video.`);
+    }
   }
-  return aiClient;
+
+  if (transcriptItems.length === 0) {
+    throw new Error("No captions found for this YouTube video.");
+  }
+
+  const maxOffset = Math.max(...transcriptItems.map(item => item.offset), 0);
+  // If the largest offset is over 5000, we treat it as milliseconds, otherwise as seconds.
+  const multiplier = maxOffset > 5000 ? 0.001 : 1.0;
+
+  return transcriptItems
+    .map(item => {
+      const seconds = item.offset * multiplier;
+      return `[${formatTime(seconds)}] ${item.text}`;
+    })
+    .join('\n');
+}
+
+// Lazy initialize Gemini client
+function getGeminiClient(): GoogleGenAI {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || key === "MY_GEMINI_API_KEY" || key.trim() === "") {
+    throw new Error("GEMINI_API_KEY is not configured or is set to the placeholder. Please configure your actual Gemini API key in the 'Settings > Secrets' panel in AI Studio, or define it in your local '.env' file as GEMINI_API_KEY=your_key.");
+  }
+  return new GoogleGenAI({
+    apiKey: key.trim(),
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
+    }
+  });
 }
 
 // Map any deprecated model or placeholder to gemini-3.5-flash
@@ -213,7 +399,11 @@ async function startServer() {
         });
         return res.json({ success: true, message: "Gemini API connection successful!", response: response.text });
       } catch (error: any) {
-        return res.status(500).json({ success: false, error: error.message || "Failed to connect to Gemini API" });
+        console.error("[Gemini Ping Error]:", error);
+        return res.status(500).json({ 
+          success: false, 
+          error: error.message || "Failed to connect to Gemini API. Please check your API key validity and network." 
+        });
       }
     } else if (provider === "ollama") {
       // For Ollama, the server tries to ping the endpoint. 
@@ -262,11 +452,39 @@ async function startServer() {
       moduleType, 
       uploadedFileName = "", 
       uploadedFileType = "", 
-      contextText = "", 
+      contextText: rawContextText = "", 
       options = {}, 
       prompt: rawPrompt = "", 
       systemInstruction: rawSystemInstruction = "" 
     } = req.body;
+
+    let contextText = rawContextText;
+    let isFallback = false;
+    let fallbackReason = "";
+
+    // Identify if there is a YouTube URL
+    const videoUrl = req.body.videoUrl || (options && options.videoUrl);
+
+    if (videoUrl && (!contextText || contextText.trim() === "")) {
+      try {
+        console.log(`[YouTube Extraction] Fetching transcript for url: ${videoUrl}`);
+        contextText = await fetchYoutubeTranscriptText(videoUrl);
+        console.log(`[YouTube Extraction] Successfully retrieved ${contextText.split('\n').length} subtitle lines.`);
+      } catch (err: any) {
+        console.error(`[YouTube Extraction Failed] Rejecting generation:`, err.message);
+        return res.status(400).json({
+          success: false,
+          error: `Transcript extraction failed: ${err.message || "Subtitles/Captions are disabled or unavailable for this video."} Please check if captions/subtitles are enabled on this video and try again.`
+        });
+      }
+    } else if (uploadedFileType === 'video' && (!contextText || contextText.trim() === "")) {
+      // Enforce transcript check for local/direct video uploads
+      console.error(`[Video Extraction Failed] Rejecting generation: No captions/transcript found for direct video file upload.`);
+      return res.status(400).json({
+        success: false,
+        error: "Transcript extraction failed: No captions/subtitles are available for this video. Local video uploads do not contain pre-extracted captions. Please use a YouTube video link with captions/subtitles enabled instead."
+      });
+    }
 
     // Compile customized prompts if moduleType is specified, otherwise fall back to raw input
     const { prompt, systemInstruction } = compilePromptAndSystemInstruction(
@@ -307,7 +525,10 @@ async function startServer() {
         return res.json({ 
           success: true, 
           text: textResult, 
-          svg: svgResult || undefined 
+          svg: svgResult || undefined,
+          isFallback,
+          fallbackReason: fallbackReason || undefined,
+          extractedTranscript: (videoUrl && !isFallback) ? contextText : undefined
         });
       } catch (error: any) {
         console.error("Gemini Generation Error:", error);
@@ -355,7 +576,10 @@ async function startServer() {
         return res.json({ 
           success: true, 
           text: textResult, 
-          svg: svgResult || undefined 
+          svg: svgResult || undefined,
+          isFallback,
+          fallbackReason: fallbackReason || undefined,
+          extractedTranscript: (videoUrl && !isFallback) ? contextText : undefined
         });
       } catch (error: any) {
         console.error("Ollama Proxy Generation Error:", error);

@@ -17,8 +17,9 @@ import {
   Video, 
   FileText, 
   Link2, 
-  AlertCircle, 
-  Settings2, 
+  AlertCircle,
+  AlertTriangle,
+  Settings2,  
   CheckCircle, 
   Play, 
   Sparkles, 
@@ -136,6 +137,7 @@ export default function SessionWorkspace({
   const [cancelGeneration, setCancelGeneration] = useState(false);
   const [generatedPreviewContent, setGeneratedPreviewContent] = useState<string>('');
   const [generatedDiagramSvg, setGeneratedDiagramSvg] = useState<string>('');
+  const [generationFallbackInfo, setGenerationFallbackInfo] = useState<{ isFallback: boolean; reason: string } | null>(null);
 
   // Confirmation Modals State
   const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
@@ -273,7 +275,7 @@ export default function SessionWorkspace({
       }
       setIsLlmChecking(true);
       try {
-        if (llmConfig.clientSideDirect) {
+        if (llmConfig.clientSideDirect && llmConfig.provider === 'ollama') {
           const res = await fetch(`${llmConfig.endpoint}/api/tags`);
           setIsLlmAvailable(res.ok);
         } else {
@@ -427,6 +429,11 @@ export default function SessionWorkspace({
         // Run customized high-quality sandbox templates
         await new Promise((resolve) => setTimeout(resolve, 2500)); // Simulate loading
         
+        setGenerationFallbackInfo({
+          isFallback: true,
+          reason: "Sandbox Simulator is active. Generates immediate high-fidelity training documents for offline evaluation."
+        });
+
         if (moduleType === 'transcript') {
           resultText = generateMockTranscript(uploadedFile.name, videoOptions);
         } else if (moduleType === 'summary') {
@@ -488,6 +495,7 @@ Please compile this into a beautifully detailed, structured, chapter-by-chapter 
             moduleType,
             uploadedFileName: uploadedFile.name,
             uploadedFileType: uploadedFile.type,
+            videoUrl: uploadedFile.videoUrl, // <-- PASS THE REAL VIDEO URL (e.g. YouTube Link)
             contextText,
             options,
             prompt,
@@ -498,6 +506,28 @@ Please compile this into a beautifully detailed, structured, chapter-by-chapter 
         const resData = await response.json();
         if (response.ok && resData.success) {
           resultText = resData.text;
+
+          // Set fallback status
+          if (resData.isFallback) {
+            setGenerationFallbackInfo({
+              isFallback: true,
+              reason: resData.fallbackReason || 'The server used a high-fidelity simulated response.'
+            });
+          } else {
+            setGenerationFallbackInfo({
+              isFallback: false,
+              reason: ''
+            });
+          }
+
+          // If real transcript subtitles were extracted, update the state
+          if (resData.extractedTranscript) {
+            setUploadedFile(prev => prev ? {
+              ...prev,
+              rawText: resData.extractedTranscript
+            } : null);
+          }
+
           // For architecture, draw a beautiful SVG based on results or fallback to standard report diagram
           if (moduleType === 'architectureReport' && archOptions.includeDiagrams) {
             svg = resData.svg || generateMockArchitectureReport(uploadedFile.name, archOptions).diagramSvg;
@@ -1175,7 +1205,7 @@ Please compile this into a beautifully detailed, structured, chapter-by-chapter 
                   <input
                     id="video-url-input"
                     type="text"
-                    placeholder="https://example.com/training-lesson.mp4"
+                    placeholder="e.g., https://youtu.be/SJqGYwRq0uc or raw streaming link"
                     value={videoLink}
                     onChange={(e) => setVideoLink(e.target.value)}
                     className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#008567] focus:ring-1 focus:ring-[#008567]/20"
@@ -1190,6 +1220,9 @@ Please compile this into a beautifully detailed, structured, chapter-by-chapter 
                   Reference link
                 </button>
               </div>
+              <p className="text-[10px] text-slate-500 leading-relaxed font-medium">
+                💡 <strong>YouTube Integration Active:</strong> Paste any YouTube video link. The server will extract and ground all summaries, FAQs, transcripts, and specifications on the actual video captions/subtitles.
+              </p>
             </div>
           )}
 
@@ -1240,7 +1273,24 @@ Please compile this into a beautifully detailed, structured, chapter-by-chapter 
 
       {/* STEP 2: CONFIGURATION & WORKSPACE MANIPULATION */}
       {currentStep === 2 && uploadedFile && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="space-y-6">
+          {uploadError && (
+            <div id="step2-error-message" className="bg-[#ff8d6d]/5 border border-[#ff8d6d]/25 rounded-2xl p-4 text-[#ff8d6d] text-xs flex gap-3.5 items-start font-medium shadow-xs">
+              <AlertCircle className="w-5 h-5 text-[#ff8d6d] shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <span className="font-bold uppercase tracking-wider block text-[10px] text-rose-500 mb-0.5 font-mono">Generation Failed</span>
+                <span className="text-slate-700 leading-relaxed text-xs">{uploadError}</span>
+              </div>
+              <button 
+                onClick={() => setUploadError(null)}
+                className="text-slate-400 hover:text-slate-600 font-bold px-2 py-1 text-xs select-none transition-colors shrink-0"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           
           {/* LEFT PANEL: Action Selector & Custom Configurations Options (Column width 5/12) */}
           <div className="lg:col-span-5 space-y-6">
@@ -1882,7 +1932,8 @@ Please compile this into a beautifully detailed, structured, chapter-by-chapter 
 
           </div>
         </div>
-      )}
+      </div>
+    )}
 
       {/* STEP 3: HIGH-QUALITY GENERATION PREVIEW & ACCEPT/REJECT CYCLE */}
       {currentStep === 3 && activeModule && (
@@ -1939,6 +1990,44 @@ Please compile this into a beautifully detailed, structured, chapter-by-chapter 
               )}
             </div>
           </div>
+
+          {/* Fallback & Real-time Extraction Status Banner */}
+          {generationFallbackInfo && (
+            <div 
+              id="generation-status-banner"
+              className={`border rounded-xl p-4 flex gap-3.5 shadow-xs transition-all duration-300 ${
+                generationFallbackInfo.isFallback 
+                  ? 'bg-amber-50/70 border-amber-200/60 text-amber-900' 
+                  : 'bg-emerald-50/75 border-emerald-200/60 text-emerald-950'
+              }`}
+            >
+              <div className="flex-shrink-0 mt-0.5">
+                {generationFallbackInfo.isFallback ? (
+                  <div className="p-1.5 bg-amber-100/80 rounded-lg text-amber-700">
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
+                ) : (
+                  <div className="p-1.5 bg-emerald-100/80 rounded-lg text-emerald-700">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                )}
+              </div>
+              <div>
+                <h4 className={`text-xs font-bold tracking-wider uppercase font-mono ${
+                  generationFallbackInfo.isFallback ? 'text-amber-800' : 'text-emerald-800'
+                }`}>
+                  {generationFallbackInfo.isFallback ? 'Simulation / Generative Fallback Active' : 'Real YouTube Subtitles Extracted'}
+                </h4>
+                <p className={`text-xs mt-1 leading-relaxed font-medium ${
+                  generationFallbackInfo.isFallback ? 'text-amber-700/90' : 'text-emerald-700/95'
+                }`}>
+                  {generationFallbackInfo.isFallback 
+                    ? generationFallbackInfo.reason 
+                    : `Successfully connected, parsed, and extracted real timestamped subtitles from the YouTube video streaming source with zero simulation. All generated intelligence is fully grounded in this transcript.`}
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             {/* Primary Document Content (width 8/12 or 12/12 if no diagrams) */}

@@ -57,17 +57,28 @@ export default function ModelSettings({ config, onChange }: ModelSettingsProps) 
       }
 
       // Backend-proxied ping
-      const response = await fetch('/api/ping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: config.provider,
-          endpoint: config.endpoint,
-          model: config.model
-        })
-      });
+      let response;
+      try {
+        response = await fetch('/api/ping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: config.provider,
+            endpoint: config.endpoint,
+            model: config.model
+          })
+        });
+      } catch (networkErr: any) {
+        throw new Error(`The application server is offline or unreachable. Please restart the dev server or verify your local runtime.`);
+      }
 
-      const data = await response.json();
+      let data: any = {};
+      try {
+        data = await response.json();
+      } catch (parseErr) {
+        throw new Error(`The server returned an invalid or non-JSON response (${response.status} ${response.statusText}). Is the GEMINI_API_KEY environment variable set correctly?`);
+      }
+
       if (response.ok && data.success) {
         setPingStatus({
           state: 'success',
